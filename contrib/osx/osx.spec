@@ -139,29 +139,16 @@ if APP_SIGN:
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    exclude_binaries=True,
-    name=MAIN_SCRIPT,
-    debug=False,
-    strip=False,
-    upx=True,
-    icon=electrum+ICONS_FILE,
-    console=False,
-)
-
-app = BUNDLE(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    version = VERSION,
-    name=PACKAGE + '.app',
-    icon=electrum+ICONS_FILE,
-    bundle_identifier=None,
-    info_plist={
-        'NSHighResolutionCapable': 'True',
-        'NSSupportsAutomaticGraphicsSwitching': 'True'
-    },
-)
+exe = EXE(pyz,
+          a.scripts,
+          a.binaries,
+          a.zipfiles,
+          a.datas,
+          [],
+          name=MAIN_SCRIPT,
+          debug=False,
+          bootloader_ignore_signals=False,
+          strip=False,
+          upx=True,
+          runtime_tmpdir=None,
+          console=True )
