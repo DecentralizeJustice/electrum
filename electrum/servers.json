@@ -28,18 +28,6 @@
         "t": "50001",
         "version": "1.4"
     },
-    "bauerjda5hnedjam.onion": {
-        "pruning": "-",
-        "s": "50002",
-        "t": "50001",
-        "version": "1.4"
-    },
-    "bauerjhejlv6di7s.onion": {
-        "pruning": "-",
-        "s": "50002",
-        "t": "50001",
-        "version": "1.4"
-    },
     "bitcoin.corgi.party": {
         "pruning": "-",
         "s": "50002",
@@ -71,12 +59,6 @@
         "version": "1.4"
     },
     "currentlane.lovebitco.in": {
-        "pruning": "-",
-        "s": "50002",
-        "t": "50001",
-        "version": "1.4"
-    },
-    "daedalus.bauerj.eu": {
         "pruning": "-",
         "s": "50002",
         "t": "50001",
@@ -208,12 +190,6 @@
         "t": "50001",
         "version": "1.4"
     },
-    "enode.duckdns.org": {
-        "pruning": "-",
-        "s": "50002",
-        "t": "50001",
-        "version": "1.4"
-    },
     "fedaykin.goip.de": {
         "pruning": "-",
         "s": "50002",
@@ -224,12 +200,6 @@
         "pruning": "-",
         "s": "50002",
         "t": "50003",
-        "version": "1.4"
-    },
-    "helicarrier.bauerj.eu": {
-        "pruning": "-",
-        "s": "50002",
-        "t": "50001",
         "version": "1.4"
     },
     "hsmiths4fyqlw5xw.onion": {

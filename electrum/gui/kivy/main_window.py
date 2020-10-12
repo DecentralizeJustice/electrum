@@ -249,7 +249,7 @@ class ElectrumWindow(App):
     def on_fee_histogram(self, *args):
         self._trigger_update_history()
 
-    def on_request_status(self, event, key, status):
+    def on_request_status(self, event, wallet, key, status):
         if key not in self.wallet.receive_requests:
             return
         self.update_tab('receive')
@@ -259,7 +259,7 @@ class ElectrumWindow(App):
             self.show_info(_('Payment Received') + '\n' + key)
             self._trigger_update_history()
 
-    def on_invoice_status(self, event, key):
+    def on_invoice_status(self, event, wallet, key):
         req = self.wallet.get_invoice(key)
         if req is None:
             return
@@ -907,9 +907,10 @@ class ElectrumWindow(App):
         else:
             c, u, x = self.wallet.get_balance()
             l = int(self.wallet.lnworker.get_balance()) if self.wallet.lnworker else 0
-            text = self.format_amount(c + x + u + l)
+            balance_sat = c + u + x + l
+            text = self.format_amount(balance_sat)
             self.balance = str(text.strip()) + ' [size=22dp]%s[/size]'% self.base_unit
-            self.fiat_balance = self.fx.format_amount(c+u+x) + ' [size=22dp]%s[/size]'% self.fx.ccy
+            self.fiat_balance = self.fx.format_amount(balance_sat) + ' [size=22dp]%s[/size]'% self.fx.ccy
 
     def update_wallet_synchronizing_progress(self, *dt):
         if not self.wallet:
