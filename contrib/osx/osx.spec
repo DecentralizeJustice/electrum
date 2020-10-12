@@ -60,39 +60,20 @@ block_cipher = None
 # see https://github.com/pyinstaller/pyinstaller/issues/2005
 hiddenimports = []
 hiddenimports += collect_submodules('pkg_resources')  # workaround for https://github.com/pypa/setuptools/issues/1963
-hiddenimports += collect_submodules('trezorlib')
-hiddenimports += collect_submodules('safetlib')
-hiddenimports += collect_submodules('btchip')
-hiddenimports += collect_submodules('keepkeylib')
 hiddenimports += collect_submodules('websocket')
-hiddenimports += collect_submodules('ckcc')
-hiddenimports += collect_submodules('bitbox02')
-hiddenimports += ['PyQt5.QtPrintSupport']  # needed by Revealer
 
 datas = [
     (electrum + PYPKG + '/*.json', PYPKG),
     (electrum + PYPKG + '/lnwire/*.csv', PYPKG + '/lnwire'),
     (electrum + PYPKG + '/wordlist/english.txt', PYPKG + '/wordlist'),
     (electrum + PYPKG + '/locale', PYPKG + '/locale'),
-    (electrum + PYPKG + '/plugins', PYPKG + '/plugins'),
-    (electrum + PYPKG + '/gui/icons', PYPKG + '/gui/icons'),
 ]
-datas += collect_data_files('trezorlib')
-datas += collect_data_files('safetlib')
-datas += collect_data_files('btchip')
-datas += collect_data_files('keepkeylib')
-datas += collect_data_files('ckcc')
-datas += collect_data_files('bitbox02')
 
 # Add the QR Scanner helper app
-datas += [(electrum + "contrib/osx/CalinsQRReader/build/Release/CalinsQRReader.app", "./contrib/osx/CalinsQRReader/build/Release/CalinsQRReader.app")]
 
 # Add libusb so Trezor and Safe-T mini will work
-binaries = [(electrum + "contrib/osx/libusb-1.0.dylib", ".")]
-binaries += [(electrum + "contrib/osx/libsecp256k1.0.dylib", ".")]
+binaries = [(electrum + "contrib/osx/libsecp256k1.0.dylib", ".")]
 
-# Workaround for "Retro Look":
-binaries += [b for b in collect_dynamic_libs('PyQt5') if 'macstyle' in b[0]]
 
 # We don't put these files in to actually include them in the script but to make the Analysis method scan them for imports
 a = Analysis([electrum+ MAIN_SCRIPT,
@@ -104,14 +85,6 @@ a = Analysis([electrum+ MAIN_SCRIPT,
               electrum+'electrum/bitcoin.py',
               electrum+'electrum/dnssec.py',
               electrum+'electrum/commands.py',
-              electrum+'electrum/plugins/cosigner_pool/qt.py',
-              electrum+'electrum/plugins/email_requests/qt.py',
-              electrum+'electrum/plugins/trezor/qt.py',
-              electrum+'electrum/plugins/safe_t/client.py',
-              electrum+'electrum/plugins/safe_t/qt.py',
-              electrum+'electrum/plugins/keepkey/qt.py',
-              electrum+'electrum/plugins/ledger/qt.py',
-              electrum+'electrum/plugins/coldcard/qt.py',
               ],
              binaries=binaries,
              datas=datas,
@@ -123,11 +96,12 @@ for d in a.datas:
     if 'pyconfig' in d[0]:
         a.datas.remove(d)
         break
-
+print (a.binaries)
 # Strip out parts of Qt that we never use. Reduces binary size by tens of MBs. see #4815
-qt_bins2remove=('qtweb', 'qt3d', 'qtgame', 'qtdesigner', 'qtquick', 'qtlocation', 'qttest', 'qtxml')
+qt_bins2remove=('qtweb', 'qt3d', 'qtgame', 'qtdesigner', 'qtquick', 'qtlocation', 'qttest', 'qtxml', 'qtgui', 'qtwidgets', 'qtmultimedia')
 print("Removing Qt binaries:", *qt_bins2remove)
 for x in a.binaries.copy():
+    print (x)
     for r in qt_bins2remove:
         if x[0].lower().startswith(r):
             a.binaries.remove(x)
