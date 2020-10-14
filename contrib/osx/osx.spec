@@ -77,8 +77,6 @@ binaries = [(electrum + "contrib/osx/libsecp256k1.0.dylib", ".")]
 
 # We don't put these files in to actually include them in the script but to make the Analysis method scan them for imports
 a = Analysis([electrum+ MAIN_SCRIPT,
-              electrum+'electrum/gui/qt/main_window.py',
-              electrum+'electrum/gui/text.py',
               electrum+'electrum/util.py',
               electrum+'electrum/wallet.py',
               electrum+'electrum/simple_config.py',
