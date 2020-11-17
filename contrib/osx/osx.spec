@@ -112,15 +112,21 @@ if APP_SIGN:
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(pyz,
-          a.scripts,
-          a.binaries,
-          a.zipfiles,
-          a.datas,
-          [],
-          name=MAIN_SCRIPT,
-          debug=False,
-          bootloader_ignore_signals=False,
-          strip=False,
-          upx=True,
-          runtime_tmpdir=None,
-          console=True )
+         a.scripts,
+         [],
+         exclude_binaries=True,
+         name='macElectrum',
+         debug=False,
+         bootloader_ignore_signals=False,
+         strip=False,
+         upx=True,
+         console=True )
+
+coll = COLLECT(exe,
+              a.binaries,
+              a.zipfiles,
+              a.datas,
+              strip=False,
+              upx=True,
+              upx_exclude=[],
+              name='macElectrum')
