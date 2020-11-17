@@ -1,6 +1,9 @@
 ####-*.patch
 *.pyc
 *.swp
+*.dylib
+*.DS_Store
+contrib/secp256k1/
 build/
 dist/
 *.egg/
