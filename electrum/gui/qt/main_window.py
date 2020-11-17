@@ -50,7 +50,7 @@ from PyQt5.QtWidgets import (QMessageBox, QComboBox, QSystemTrayIcon, QTabWidget
 
 import electrum
 from electrum import (keystore, ecc, constants, util, bitcoin, commands,
-                      paymentrequest)
+                      paymentrequest, lnutil)
 from electrum.bitcoin import COIN, is_address
 from electrum.plugin import run_hook, BasePlugin
 from electrum.i18n import _
@@ -67,13 +67,14 @@ from electrum.invoices import PR_PAID, PR_FAILED, pr_expiration_values, LNInvoic
 from electrum.transaction import (Transaction, PartialTxInput,
                                   PartialTransaction, PartialTxOutput)
 from electrum.wallet import (Multisig_Wallet, CannotBumpFee, Abstract_Wallet,
-                             sweep_preparations, InternalAddressCorruption)
+                             sweep_preparations, InternalAddressCorruption,
+                             CannotDoubleSpendTx)
 from electrum.version import ELECTRUM_VERSION
 from electrum.network import Network, TxBroadcastError, BestEffortRequestFailed, UntrustedServerReturnedError
 from electrum.exchange_rate import FxThread
 from electrum.simple_config import SimpleConfig
 from electrum.logging import Logger
-from electrum.lnutil import ln_dummy_address
+from electrum.lnutil import ln_dummy_address, extract_nodeid, ConnStringFormatError
 from electrum.lnaddr import lndecode, LnDecodeException
 
 from .exception_window import Exception_Hook
@@ -169,6 +170,8 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger):
         self.gui_thread = gui_object.gui_thread
         assert wallet, "no wallet"
         self.wallet = wallet
+        if wallet.has_lightning():
+            self.wallet.config.set_key('show_channels_tab', True)
 
         self.setup_exception_hook()
 
@@ -486,7 +489,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger):
         run_hook('close_wallet', self.wallet)
 
     @profiler
-    def load_wallet(self, wallet):
+    def load_wallet(self, wallet: Abstract_Wallet):
         wallet.thread = TaskThread(self, self.on_error)
         self.update_recently_visited(wallet.storage.path)
         if wallet.has_lightning():
@@ -811,18 +814,18 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger):
         if len(txns) >= 3:
             total_amount = 0
             for tx in txns:
-                is_relevant, is_mine, v, fee = self.wallet.get_wallet_delta(tx)
-                if not is_relevant:
+                tx_wallet_delta = self.wallet.get_wallet_delta(tx)
+                if not tx_wallet_delta.is_relevant:
                     continue
-                total_amount += v
+                total_amount += tx_wallet_delta.delta
             self.notify(_("{} new transactions: Total amount received in the new transactions {}")
                         .format(len(txns), self.format_amount_and_units(total_amount)))
         else:
             for tx in txns:
-                is_relevant, is_mine, v, fee = self.wallet.get_wallet_delta(tx)
-                if not is_relevant:
+                tx_wallet_delta = self.wallet.get_wallet_delta(tx)
+                if not tx_wallet_delta.is_relevant:
                     continue
-                self.notify(_("New transaction: {}").format(self.format_amount_and_units(v)))
+                self.notify(_("New transaction: {}").format(self.format_amount_and_units(tx_wallet_delta.delta)))
 
     def notify(self, message):
         if self.tray:
@@ -1367,7 +1370,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger):
         grid.addWidget(self.max_button, 3, 3)
 
         self.save_button = EnterButton(_("Save"), self.do_save_invoice)
-        self.send_button = EnterButton(_("Pay"), self.do_pay)
+        self.send_button = EnterButton(_("Pay") + "...", self.do_pay)
         self.clear_button = EnterButton(_("Clear"), self.do_clear)
 
         buttons = QHBoxLayout()
@@ -1483,9 +1486,16 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger):
         if not pr:
             errors = self.payto_e.get_errors()
             if errors:
-                self.show_warning(_("Invalid Lines found:") + "\n\n" +
-                                  '\n'.join([_("Line #") + f"{err.idx+1}: {err.line_content[:40]}... ({repr(err.exc)})"
-                                             for err in errors]))
+                if len(errors) == 1 and not errors[0].is_multiline:
+                    err = errors[0]
+                    self.show_warning(_("Failed to parse 'Pay to' line") + ":\n" +
+                                      f"{err.line_content[:40]}...\n\n"
+                                      f"{err.exc!r}")
+                else:
+                    self.show_warning(_("Invalid Lines found:") + "\n\n" +
+                                      '\n'.join([_("Line #") +
+                                                 f"{err.idx+1}: {err.line_content[:40]}... ({err.exc!r})"
+                                                 for err in errors]))
                 return True
 
             if self.payto_e.is_alias and self.payto_e.validated is False:
@@ -1747,6 +1757,11 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger):
         return make_tx
 
     def open_channel(self, connect_str, funding_sat, push_amt):
+        try:
+            extract_nodeid(connect_str)
+        except ConnStringFormatError as e:
+            self.main_window.show_error(str(e))
+            return
         # use ConfirmTxDialog
         # we need to know the fee before we broadcast, because the txid is required
         make_tx = self.mktx_for_open_channel(funding_sat)
@@ -2102,6 +2117,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger):
             'daemon': self.gui_object.daemon,
             'util': util,
             'bitcoin': bitcoin,
+            'lnutil': lnutil,
         })
 
         c = commands.Commands(config=self.config,
@@ -2149,7 +2165,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger):
         sb.addPermanentWidget(self.seed_button)
         self.lightning_button = None
         if self.wallet.has_lightning() and self.network:
-            self.lightning_button = StatusBarButton(read_QIcon("lightning.png"), _("Lightning Network"), self.gui_object.show_lightning_dialog)
+            self.lightning_button = StatusBarButton(read_QIcon("lightning_disconnected.png"), _("Lightning Network"), self.gui_object.show_lightning_dialog)
             self.update_lightning_icon()
             sb.addPermanentWidget(self.lightning_button)
         self.status_button = None
@@ -2189,21 +2205,18 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger):
     def update_lightning_icon(self):
         if self.lightning_button is None:
             return
-        if not self.network.is_lightning_running():
+        if self.network.lngossip is None:
             return
-        cur, total = self.network.lngossip.get_sync_progress_estimate()
+
+        # display colorful lightning icon to signal connection
+        self.lightning_button.setIcon(read_QIcon("lightning.png"))
+
+        cur, total, progress_percent = self.network.lngossip.get_sync_progress_estimate()
         # self.logger.debug(f"updating lngossip sync progress estimate: cur={cur}, total={total}")
-        progress_percent = 0
         progress_str = "??%"
-        if cur is not None and total is not None and total > 0:
-            # note: Progress is rescaled such that 95% is considered "done".
-            #       "Real" progress can stay around 98-99% for a long time, which
-            #       might needlessly worry users.
-            progress_percent = (1.0 / 0.95 * cur / total) * 100
-            progress_percent = min(progress_percent, 100)
-            progress_percent = round(progress_percent)
+        if progress_percent is not None:
             progress_str = f"{progress_percent}%"
-        if progress_percent >= 100:
+        if progress_percent and progress_percent >= 100:
             self.lightning_button.setMaximumWidth(25)
             self.lightning_button.setText('')
             self.lightning_button.setToolTip(_("The Lightning Network graph is fully synced."))
@@ -2290,25 +2303,6 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger):
         if d.exec_():
             self.set_contact(line2.text(), line1.text())
 
-    def disable_lightning(self):
-        warning = _('This will delete your lightning private keys')
-        r = self.question(_('Disable Lightning payments?') + '\n\n' + warning)
-        if not r:
-            return
-        self.wallet.remove_lightning()
-        self.show_warning(_('Lightning keys have been removed. This wallet will be closed'))
-        self.close()
-
-    def enable_lightning(self):
-        warning1 = _("Lightning support in Electrum is experimental. Do not put large amounts in lightning channels.")
-        warning2 = _("Funds stored in lightning channels are not recoverable from your seed. You must backup your wallet file everytime you create a new channel.")
-        r = self.question(_('Enable Lightning payments?') + '\n\n' + _('WARNINGS') + ': ' + '\n\n' + warning1 + '\n\n' + warning2)
-        if not r:
-            return
-        self.wallet.init_lightning()
-        self.show_warning(_('Lightning keys have been initialized. This wallet will be closed'))
-        self.close()
-
     def show_wallet_info(self):
         dialog = WindowModalDialog(self, _("Wallet Information"))
         dialog.setMinimumSize(500, 100)
@@ -2335,19 +2329,11 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger):
         # lightning
         grid.addWidget(QLabel(_('Lightning') + ':'), 5, 0)
         if self.wallet.can_have_lightning():
-            if self.wallet.has_lightning():
-                lightning_b = QPushButton(_('Disable'))
-                lightning_b.clicked.connect(dialog.close)
-                lightning_b.clicked.connect(self.disable_lightning)
-                lightning_label = QLabel(_('Enabled'))
-                lightning_b.setDisabled(bool(self.wallet.lnworker.channels))
-            else:
-                lightning_b = QPushButton(_('Enable'))
-                lightning_b.clicked.connect(dialog.close)
-                lightning_b.clicked.connect(self.enable_lightning)
-                lightning_label = QLabel(_('Disabled'))
-            grid.addWidget(lightning_label, 5, 1)
-            grid.addWidget(lightning_b, 5, 2)
+            grid.addWidget(QLabel(_('Enabled')), 5, 1)
+            local_nodeid = QLabel(bh2u(self.wallet.lnworker.node_keypair.pubkey))
+            local_nodeid.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            grid.addWidget(QLabel(_('Lightning Node ID:')), 6, 0)
+            grid.addWidget(local_nodeid, 6, 1, 1, 3)
         else:
             grid.addWidget(QLabel(_("Not available for this wallet.")), 5, 1)
             grid.addWidget(HelpButton(_("Lightning is currently restricted to HD wallets with p2wpkh addresses.")), 5, 2)
@@ -3188,7 +3174,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger):
         if fee is None:
             self.show_error(_("Can't bump fee: unknown fee for original transaction."))
             return
-        tx_label = self.wallet.get_label(txid)
+        tx_label = self.wallet.get_label_for_txid(txid)
         tx_size = tx.estimated_size()
         old_fee_rate = fee / tx_size  # sat/vbyte
         d = WindowModalDialog(self, _('Bump Fee'))
@@ -3235,6 +3221,56 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger):
         if is_final:
             new_tx.set_rbf(False)
         self.show_transaction(new_tx, tx_desc=tx_label)
+
+    def dscancel_dialog(self, tx: Transaction):
+        txid = tx.txid()
+        assert txid
+        fee = self.wallet.get_tx_fee(txid)
+        if fee is None:
+            self.show_error(_('Cannot cancel transaction') + ': ' + _('unknown fee for original transaction'))
+            return
+        tx_size = tx.estimated_size()
+        old_fee_rate = fee / tx_size  # sat/vbyte
+        d = WindowModalDialog(self, _('Cancel transaction'))
+        vbox = QVBoxLayout(d)
+        vbox.addWidget(WWLabel(_("Cancel an unconfirmed RBF transaction by double-spending "
+                                 "its inputs back to your wallet with a higher fee.")))
+
+        grid = QGridLayout()
+        grid.addWidget(QLabel(_('Current Fee') + ':'), 0, 0)
+        grid.addWidget(QLabel(self.format_amount(fee) + ' ' + self.base_unit()), 0, 1)
+        grid.addWidget(QLabel(_('Current Fee rate') + ':'), 1, 0)
+        grid.addWidget(QLabel(self.format_fee_rate(1000 * old_fee_rate)), 1, 1)
+
+        grid.addWidget(QLabel(_('New Fee rate') + ':'), 2, 0)
+        def on_textedit_rate():
+            fee_slider.deactivate()
+        feerate_e = FeerateEdit(lambda: 0)
+        feerate_e.setAmount(max(old_fee_rate * 1.5, old_fee_rate + 1))
+        feerate_e.textEdited.connect(on_textedit_rate)
+        grid.addWidget(feerate_e, 2, 1)
+
+        def on_slider_rate(dyn, pos, fee_rate):
+            fee_slider.activate()
+            if fee_rate is not None:
+                feerate_e.setAmount(fee_rate / 1000)
+        fee_slider = FeeSlider(self, self.config, on_slider_rate)
+        fee_combo = FeeComboBox(fee_slider)
+        fee_slider.deactivate()
+        grid.addWidget(fee_slider, 3, 1)
+        grid.addWidget(fee_combo, 3, 2)
+
+        vbox.addLayout(grid)
+        vbox.addLayout(Buttons(CancelButton(d), OkButton(d)))
+        if not d.exec_():
+            return
+        new_fee_rate = feerate_e.get_amount()
+        try:
+            new_tx = self.wallet.dscancel(tx=tx, new_fee_rate=new_fee_rate)
+        except CannotDoubleSpendTx as e:
+            self.show_error(str(e))
+            return
+        self.show_transaction(new_tx)
 
     def save_transaction_into_wallet(self, tx: Transaction):
         win = self.top_level_window()
