@@ -121,13 +121,10 @@ info "Installing requirements..."
 python3 -m pip install --no-dependencies --no-warn-script-location -Ir ./contrib/deterministic-build/requirements.txt \
     || fail "Could not install requirements"
 
-<<<<<<< HEAD
 info "Installing hardware wallet requirements..."
 python3 -m pip install --no-dependencies --no-warn-script-location -Ir ./contrib/deterministic-build/requirements-hw.txt \
     || fail "Could not install hardware wallet requirements"
 
-=======
->>>>>>> f8a828385e1ce775de27514ceb033292106339f5
 info "Installing dependencies specific to binaries..."
 python3 -m pip install --no-dependencies --no-warn-script-location -Ir ./contrib/deterministic-build/requirements-binaries-mac.txt \
     || fail "Could not install dependencies specific to binaries"

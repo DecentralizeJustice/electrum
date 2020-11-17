@@ -4,6 +4,7 @@
 *.dylib
 *.DS_Store
 contrib/secp256k1/
+contrib/osx/build-venv/
 build/
 dist/
 *.egg/
